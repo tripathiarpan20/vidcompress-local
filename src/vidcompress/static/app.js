@@ -20,7 +20,7 @@ import {
 const CODECS = {
   h264: {
     label: "H.264 (AVC)",
-    videoCodec: "avc1.640032",
+    videoCodec: "avc1.4d0034",
     container: "mp4",
     ext: ".mp4",
     muxerVideoCodec: "avc",
@@ -729,29 +729,32 @@ async function transcode(file, cfg) {
   /* ── 9. Flush everything ───────────────────────────── */
   showProgress(0.96, "Flushing encoders\u2026");
 
-  await videoDecoder.flush();
-  await videoEncoder.flush();
+  const safeFlush = async (codec, label) => {
+    try {
+      if (codec.state === "configured") await codec.flush();
+    } catch (e) {
+      console.warn(`${label} flush:`, e);
+    }
+  };
 
-  if (audioDecoder) {
+  const safeClose = (codec, label) => {
     try {
-      await audioDecoder.flush();
+      if (codec.state !== "closed") codec.close();
     } catch (e) {
-      console.warn("Audio decoder flush:", e);
+      console.warn(`${label} close:`, e);
     }
-  }
-  if (audioEncoder) {
-    try {
-      await audioEncoder.flush();
-    } catch (e) {
-      console.warn("Audio encoder flush:", e);
-    }
-  }
+  };
+
+  await safeFlush(videoDecoder, "VideoDecoder");
+  await safeFlush(videoEncoder, "VideoEncoder");
+  if (audioDecoder) await safeFlush(audioDecoder, "AudioDecoder");
+  if (audioEncoder) await safeFlush(audioEncoder, "AudioEncoder");
 
   /* ── 10. Finalise ──────────────────────────────────── */
-  videoDecoder.close();
-  videoEncoder.close();
-  if (audioDecoder) audioDecoder.close();
-  if (audioEncoder) audioEncoder.close();
+  safeClose(videoDecoder, "VideoDecoder");
+  safeClose(videoEncoder, "VideoEncoder");
+  if (audioDecoder) safeClose(audioDecoder, "AudioDecoder");
+  if (audioEncoder) safeClose(audioEncoder, "AudioEncoder");
 
   muxer.finalize();
   showProgress(1, "Complete!");
