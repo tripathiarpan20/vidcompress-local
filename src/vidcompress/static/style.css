@@ -29,7 +29,7 @@ body {
 
 #app {
   width: 100%;
-  max-width: 600px;
+  max-width: 800px;
 }
 
 /* ── Header ───────────────────────────────────────────── */
@@ -100,28 +100,47 @@ header h1 {
 }
 
 .panel h2 {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
-/* ── File Info ────────────────────────────────────────── */
+/* ── Input Preview ────────────────────────────────────── */
 
-.file-info-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.4rem 1rem;
-  font-size: 0.9rem;
+.video-wrap {
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  margin-bottom: 0.75rem;
 }
 
-.info-label {
+.video-wrap video {
+  display: block;
+  width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  background: #000;
+}
+
+.file-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.82rem;
   color: var(--text-muted);
 }
 
-.info-value {
+.file-info-row .info-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.file-info-row .info-chip strong {
+  color: var(--text);
   font-weight: 500;
 }
 
@@ -234,51 +253,187 @@ header h1 {
   transition: width 0.15s ease;
 }
 
+/* ── Comparison slider ────────────────────────────────── */
+
+.compare-wrapper {
+  user-select: none;
+}
+
+.compare-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000;
+  cursor: col-resize;
+}
+
+.compare-vid {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
+}
+
+.compare-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  clip-path: inset(0 50% 0 0);
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.compare-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: #fff;
+  opacity: 0.9;
+}
+
+.compare-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #111;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.compare-label {
+  position: absolute;
+  top: 10px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+.compare-label-left { left: 10px; }
+.compare-label-right { right: 10px; }
+
+/* Comparison controls */
+.compare-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--border);
+}
+
+.seek-bar {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
 /* ── Result ───────────────────────────────────────────── */
 
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .result-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  display: flex;
+  flex: 1;
+  gap: 1.25rem;
+  flex-wrap: wrap;
 }
 
 .stat {
-  background: var(--surface-2);
-  border-radius: 8px;
-  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .stat-label {
-  display: block;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
-  margin-bottom: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .stat-value {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
+  margin-top: 0.1rem;
 }
 
 .stat-value.positive { color: var(--green); }
 .stat-value.negative { color: var(--red); }
 
 .download-btn {
-  display: block;
-  text-align: center;
-  padding: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.25rem;
   background: var(--green);
   color: #000;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
   transition: opacity 0.2s;
+  flex-shrink: 0;
 }
 
 .download-btn:hover {
   opacity: 0.85;
+}
+
+.download-btn svg {
+  flex-shrink: 0;
 }
 
 /* ── Footer ───────────────────────────────────────────── */

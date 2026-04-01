@@ -82,6 +82,8 @@ function formatDuration(s) {
 let selectedFile = null;
 let videoMeta = null;
 let isCompressing = false;
+let inputVideoUrl = null;
+let outputVideoUrl = null;
 
 /* ── Initialisation ───────────────────────────────────── */
 
@@ -140,42 +142,39 @@ function setupFileInput() {
 async function handleFile(file) {
   selectedFile = file;
 
-  const url = URL.createObjectURL(file);
-  try {
-    const v = document.createElement("video");
-    v.muted = true;
-    v.src = url;
-    await new Promise((res, rej) => {
-      v.onloadedmetadata = res;
-      v.onerror = () => rej(new Error("Cannot read video metadata"));
-    });
+  // Revoke previous URLs
+  if (inputVideoUrl) URL.revokeObjectURL(inputVideoUrl);
+  if (outputVideoUrl) URL.revokeObjectURL(outputVideoUrl);
+  outputVideoUrl = null;
 
-    videoMeta = {
-      width: v.videoWidth,
-      height: v.videoHeight,
-      duration: v.duration,
-    };
+  inputVideoUrl = URL.createObjectURL(file);
 
-    $("#file-info").innerHTML = `
-      <div class="file-info-grid">
-        <span class="info-label">File</span>
-        <span class="info-value">${file.name}</span>
-        <span class="info-label">Size</span>
-        <span class="info-value">${formatBytes(file.size)}</span>
-        <span class="info-label">Resolution</span>
-        <span class="info-value">${videoMeta.width}&times;${videoMeta.height}</span>
-        <span class="info-label">Duration</span>
-        <span class="info-value">${formatDuration(videoMeta.duration)}</span>
-      </div>`;
+  const vid = $("#input-video");
+  vid.src = inputVideoUrl;
 
-    $("#file-info").style.display = "block";
-    $("#settings-panel").style.display = "block";
-    $("#compress-btn").disabled = false;
-    $("#result-panel").style.display = "none";
-    $("#progress-panel").style.display = "none";
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  await new Promise((res, rej) => {
+    vid.onloadedmetadata = res;
+    vid.onerror = () => rej(new Error("Cannot read video metadata"));
+  });
+
+  videoMeta = {
+    width: vid.videoWidth,
+    height: vid.videoHeight,
+    duration: vid.duration,
+  };
+
+  $("#file-info").innerHTML = `
+    <span class="info-chip"><strong>${file.name}</strong></span>
+    <span class="info-chip">${formatBytes(file.size)}</span>
+    <span class="info-chip">${videoMeta.width}&times;${videoMeta.height}</span>
+    <span class="info-chip">${formatDuration(videoMeta.duration)}</span>`;
+
+  $("#input-preview").style.display = "block";
+  $("#settings-panel").style.display = "block";
+  $("#compress-btn").disabled = false;
+  $("#result-panel").style.display = "none";
+  $("#compare-panel").style.display = "none";
+  $("#progress-panel").style.display = "none";
 }
 
 /* ── Controls ─────────────────────────────────────────── */
@@ -216,7 +215,6 @@ async function detectCodecSupport() {
     select.appendChild(opt);
   }
 
-  // Auto-select first supported codec
   const first = select.querySelector("option:not([disabled])");
   if (first) first.selected = true;
 }
@@ -240,7 +238,6 @@ async function startCompression() {
   const quality = parseInt($("#quality").value, 10);
   const resValue = $("#resolution").value;
 
-  // Output dimensions
   let outW = videoMeta.width;
   let outH = videoMeta.height;
   if (resValue !== "original") {
@@ -253,18 +250,17 @@ async function startCompression() {
   outW = Math.round(outW / 2) * 2;
   outH = Math.round(outH / 2) * 2;
 
-  // Bitrate from quality slider (exponential scale)
   const pixels = outW * outH;
   const pixelFactor = pixels / (1920 * 1080);
   const bitrate = Math.round(
     200_000 * Math.pow(25_000_000 / 200_000, quality / 100) * pixelFactor
   );
 
-  // UI setup
   $("#compress-btn").disabled = true;
   $("#compress-btn").textContent = "Compressing\u2026";
   $("#progress-panel").style.display = "block";
   $("#result-panel").style.display = "none";
+  $("#compare-panel").style.display = "none";
   $("#progress-text").style.color = "";
   showProgress(0, "Starting\u2026");
 
@@ -296,7 +292,7 @@ async function startCompression() {
   }
 }
 
-/* ── Show result ──────────────────────────────────────── */
+/* ── Show result + comparison ─────────────────────────── */
 
 function presentResult(buffer, codec, elapsed) {
   const outSize = buffer.byteLength;
@@ -304,34 +300,148 @@ function presentResult(buffer, codec, elapsed) {
   const ratio = ((1 - outSize / inSize) * 100).toFixed(1);
   const speed = (videoMeta.duration / elapsed).toFixed(1);
 
+  // Create output blob URL
+  if (outputVideoUrl) URL.revokeObjectURL(outputVideoUrl);
   const blob = new Blob([buffer], { type: codec.mime });
-  const url = URL.createObjectURL(blob);
+  outputVideoUrl = URL.createObjectURL(blob);
+
   const baseName = selectedFile.name.replace(/\.[^.]+$/, "");
   const outName = `${baseName}_compressed${codec.ext}`;
 
-  $("#result-panel").style.display = "block";
-  $("#result-panel").innerHTML = `
-    <div class="result-stats">
-      <div class="stat">
-        <span class="stat-label">Output size</span>
-        <span class="stat-value">${formatBytes(outSize)}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Reduction</span>
-        <span class="stat-value ${ratio > 0 ? "positive" : "negative"}">${ratio > 0 ? "\u2212" : "+"}${Math.abs(ratio)}%</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Speed</span>
-        <span class="stat-value">${speed}x realtime</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Time</span>
-        <span class="stat-value">${elapsed.toFixed(1)}s</span>
-      </div>
+  // ── Stats + download ──
+  $("#result-stats").innerHTML = `
+    <div class="stat">
+      <span class="stat-label">Output</span>
+      <span class="stat-value">${formatBytes(outSize)}</span>
     </div>
-    <a href="${url}" download="${outName}" class="download-btn">
-      Download ${outName}
-    </a>`;
+    <div class="stat">
+      <span class="stat-label">Reduction</span>
+      <span class="stat-value ${ratio > 0 ? "positive" : "negative"}">${ratio > 0 ? "\u2212" : "+"}${Math.abs(ratio)}%</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Speed</span>
+      <span class="stat-value">${speed}x</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Time</span>
+      <span class="stat-value">${elapsed.toFixed(1)}s</span>
+    </div>`;
+
+  const dlBtn = $("#download-btn");
+  dlBtn.href = outputVideoUrl;
+  dlBtn.download = outName;
+  dlBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ${outName}`;
+
+  $("#result-panel").style.display = "block";
+
+  // ── Comparison slider ──
+  setupComparison(inputVideoUrl, outputVideoUrl);
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Comparison slider
+ * ═══════════════════════════════════════════════════════ */
+
+function setupComparison(originalUrl, compressedUrl) {
+  const panel = $("#compare-panel");
+  const container = $("#compare-container");
+  const vidOrig = $("#compare-original");
+  const vidComp = $("#compare-compressed");
+  const divider = $("#compare-divider");
+  const playBtn = $("#compare-play-btn");
+  const seekBar = $("#compare-seek");
+  const playIcon = $("#play-icon");
+  const pauseIcon = $("#pause-icon");
+
+  // Load both videos
+  vidOrig.src = originalUrl;
+  vidComp.src = compressedUrl;
+
+  panel.style.display = "block";
+
+  // Wait for both to be ready
+  Promise.all([
+    new Promise((r) => (vidOrig.onloadeddata = r)),
+    new Promise((r) => (vidComp.onloadeddata = r)),
+  ]).then(() => {
+    // Set initial slider position
+    setSliderPosition(50);
+  });
+
+  // ── Slider drag ──
+  let dragging = false;
+
+  function setSliderPosition(pct) {
+    pct = Math.max(0, Math.min(100, pct));
+    vidOrig.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+    divider.style.left = `${pct}%`;
+  }
+
+  function getPercent(e) {
+    const rect = container.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    return ((clientX - rect.left) / rect.width) * 100;
+  }
+
+  container.addEventListener("mousedown", (e) => {
+    dragging = true;
+    setSliderPosition(getPercent(e));
+  });
+  container.addEventListener("touchstart", (e) => {
+    dragging = true;
+    setSliderPosition(getPercent(e));
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (dragging) setSliderPosition(getPercent(e));
+  });
+  window.addEventListener("touchmove", (e) => {
+    if (dragging) setSliderPosition(getPercent(e));
+  });
+
+  window.addEventListener("mouseup", () => (dragging = false));
+  window.addEventListener("touchend", () => (dragging = false));
+
+  // ── Play / Pause ──
+  let playing = false;
+
+  playBtn.onclick = () => {
+    if (playing) {
+      vidOrig.pause();
+      vidComp.pause();
+      playIcon.style.display = "";
+      pauseIcon.style.display = "none";
+    } else {
+      vidOrig.play();
+      vidComp.play();
+      playIcon.style.display = "none";
+      pauseIcon.style.display = "";
+    }
+    playing = !playing;
+  };
+
+  // ── Sync playback ──
+  vidOrig.addEventListener("timeupdate", () => {
+    if (!vidComp.paused && Math.abs(vidOrig.currentTime - vidComp.currentTime) > 0.1) {
+      vidComp.currentTime = vidOrig.currentTime;
+    }
+    if (vidOrig.duration) {
+      seekBar.value = (vidOrig.currentTime / vidOrig.duration) * 1000;
+    }
+  });
+
+  vidOrig.addEventListener("ended", () => {
+    playing = false;
+    playIcon.style.display = "";
+    pauseIcon.style.display = "none";
+  });
+
+  // ── Seek bar ──
+  seekBar.addEventListener("input", () => {
+    const t = (seekBar.value / 1000) * vidOrig.duration;
+    vidOrig.currentTime = t;
+    vidComp.currentTime = t;
+  });
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -364,7 +474,6 @@ async function transcode(file, cfg) {
     };
     mp4boxFile.onError = reject;
 
-    // Feed file in 4 MB chunks (async so the UI stays responsive)
     (async () => {
       const CHUNK = 4 * 1024 * 1024;
       let offset = 0;
@@ -425,6 +534,7 @@ async function transcode(file, cfg) {
       target: new Mp4Target(),
       video: { codec: muxerVideoCodec, width: outW, height: outH },
       fastStart: "in-memory",
+      firstTimestampBehavior: "offset",
     };
     if (hasAudio) {
       opts.audio = {
@@ -438,6 +548,7 @@ async function transcode(file, cfg) {
     const opts = {
       target: new WebmTarget(),
       video: { codec: muxerVideoCodec, width: outW, height: outH },
+      firstTimestampBehavior: "offset",
     };
     if (hasAudio) {
       opts.audio = {
@@ -555,7 +666,7 @@ async function transcode(file, cfg) {
         frameIdx++;
       } catch (e) {
         frame.close();
-        console.error("Decode→Encode error:", e);
+        console.error("Decode\u2192Encode error:", e);
       }
     },
     error: (e) => console.error("VideoDecoder:", e),
@@ -573,7 +684,6 @@ async function transcode(file, cfg) {
   for (let i = 0; i < videoSamples.length; i++) {
     const s = videoSamples[i];
 
-    // Backpressure — pause if decoder queue is large
     while (videoDecoder.decodeQueueSize > 30) {
       await new Promise((r) => setTimeout(r, 1));
     }
@@ -587,7 +697,7 @@ async function transcode(file, cfg) {
       })
     );
 
-    videoSamples[i] = null; // Allow GC
+    videoSamples[i] = null;
   }
 
   /* ── 8. Feed audio samples ─────────────────────────── */
@@ -653,10 +763,6 @@ async function transcode(file, cfg) {
  *  mp4box.js description extractors
  * ═══════════════════════════════════════════════════════ */
 
-/**
- * Extract codec-specific description (SPS/PPS for AVC, VPS/SPS/PPS for HEVC, etc.)
- * Required by VideoDecoder.configure().
- */
 function getVideoDescription(mp4boxFile, track) {
   try {
     const trak = mp4boxFile.getTrackById(track.id);
@@ -665,7 +771,6 @@ function getVideoDescription(mp4boxFile, track) {
       if (box) {
         const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
         box.write(stream);
-        // Skip the 8-byte box header (size + fourcc)
         return new Uint8Array(stream.buffer, 8);
       }
     }
@@ -675,15 +780,10 @@ function getVideoDescription(mp4boxFile, track) {
   return undefined;
 }
 
-/**
- * Extract AudioSpecificConfig from the esds box (for AAC),
- * or dOps for Opus-in-MP4.
- */
 function getAudioDescription(mp4boxFile, track) {
   try {
     const trak = mp4boxFile.getTrackById(track.id);
     for (const entry of trak.mdia.minf.stbl.stsd.entries) {
-      // AAC — AudioSpecificConfig lives inside the esds descriptor chain
       if (entry.esds) {
         const { esd } = entry.esds;
         if (esd && esd.descs) {
@@ -696,7 +796,6 @@ function getAudioDescription(mp4boxFile, track) {
           }
         }
       }
-      // Opus in MP4
       if (entry.dOps) {
         const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
         entry.dOps.write(stream);
