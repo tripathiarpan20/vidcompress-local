@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VidCompress</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>VidCompress</h1>
+      <p class="subtitle">Hardware-accelerated video compression in your browser</p>
+    </header>
+
+    <main>
+      <!-- Drop Zone -->
+      <div id="drop-zone">
+        <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden>
+        <div class="drop-content">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p>Drop a video file here or <span class="link">browse</span></p>
+          <p class="hint">Supports MP4, MOV, WebM</p>
+        </div>
+      </div>
+
+      <!-- File Info -->
+      <div id="file-info" class="panel" style="display:none"></div>
+
+      <!-- Settings -->
+      <div id="settings-panel" class="panel" style="display:none">
+        <h2>Settings</h2>
+        <div class="settings-grid">
+          <label for="codec">Codec</label>
+          <select id="codec"></select>
+
+          <label for="resolution">Resolution</label>
+          <select id="resolution">
+            <option value="original">Original</option>
+            <option value="1080">1080p</option>
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+            <option value="360">360p</option>
+          </select>
+
+          <label for="quality">Quality</label>
+          <div class="slider-row">
+            <span class="hint">Smaller</span>
+            <input type="range" id="quality" min="1" max="100" value="50">
+            <span class="hint">Better</span>
+            <span id="quality-value" class="badge">50</span>
+          </div>
+        </div>
+
+        <button id="compress-btn" disabled>Compress</button>
+      </div>
+
+      <!-- Progress -->
+      <div id="progress-panel" class="panel" style="display:none">
+        <div class="progress-header">
+          <span id="progress-text">Starting...</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div id="progress-bar-fill" class="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div id="result-panel" class="panel" style="display:none"></div>
+    </main>
+
+    <footer>
+      <p>All processing happens locally in your browser. No files are uploaded to any server.</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
