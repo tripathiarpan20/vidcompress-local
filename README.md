@@ -1,5 +1,7 @@
 # VidCompress
 
+![alt text](image.png)
+
 Local, hardware-accelerated video compression that runs entirely in your browser. No FFmpeg install, no cloud uploads — just a single command.
 
 ```
