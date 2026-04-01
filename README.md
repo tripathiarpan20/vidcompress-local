@@ -2,9 +2,10 @@
 
 ![alt text](image.png)
 
-Local, hardware-accelerated video compression that runs entirely in your browser. No FFmpeg install, no cloud uploads — just a single command.
+Local, hardware-accelerated video compression that runs entirely in your browser. No FFmpeg install, no cloud uploads — just two lines of command.
 
 ```
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uvx vidcompress
 ```
 
