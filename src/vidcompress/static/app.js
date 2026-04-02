@@ -465,6 +465,7 @@ async function transcode(file, cfg) {
 
   const mp4boxFile = MP4Box.createFile();
 
+  let readingDone;
   const { videoTrack, audioTrack } = await new Promise((resolve, reject) => {
     mp4boxFile.onReady = (info) => {
       resolve({
@@ -474,7 +475,7 @@ async function transcode(file, cfg) {
     };
     mp4boxFile.onError = reject;
 
-    (async () => {
+    readingDone = (async () => {
       const CHUNK = 4 * 1024 * 1024;
       let offset = 0;
       while (offset < file.size) {
@@ -491,6 +492,8 @@ async function transcode(file, cfg) {
       mp4boxFile.flush();
     })();
   });
+
+  await readingDone;
 
   if (!videoTrack) throw new Error("No video track found in file");
 
