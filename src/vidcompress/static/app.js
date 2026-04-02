@@ -504,10 +504,12 @@ async function transcode(file, cfg) {
   const audioSamples = [];
 
   mp4boxFile.onSamples = (trackId, _ref, samples) => {
+    console.log(`[DEBUG] onSamples fired: trackId=${trackId}, batch size=${samples.length}`);
     for (const s of samples) {
       if (trackId === videoTrack.id) videoSamples.push(s);
       else if (audioTrack && trackId === audioTrack.id) audioSamples.push(s);
     }
+    console.log(`[DEBUG] Running totals: video=${videoSamples.length}, audio=${audioSamples.length}`);
   };
 
   mp4boxFile.setExtractionOptions(videoTrack.id, null, {
@@ -518,7 +520,10 @@ async function transcode(file, cfg) {
       nbSamples: 10_000,
     });
   }
+  console.log(`[DEBUG] About to call mp4boxFile.start()`);
   mp4boxFile.start();
+  console.log(`[DEBUG] After start(): videoSamples=${videoSamples.length}, audioSamples=${audioSamples.length}`);
+  console.log(`[DEBUG] videoTrack:`, { id: videoTrack.id, codec: videoTrack.codec, nb_samples: videoTrack.nb_samples, duration: videoTrack.duration, timescale: videoTrack.timescale });
 
   showProgress(
     0.1,
@@ -583,7 +588,7 @@ async function transcode(file, cfg) {
     error: (e) => console.error("VideoEncoder:", e),
   });
 
-  videoEncoder.configure({
+  const encoderConfig = {
     codec: videoCodec,
     width: outW,
     height: outH,
@@ -591,7 +596,10 @@ async function transcode(file, cfg) {
     bitrateMode: "variable",
     latencyMode: "quality",
     framerate: fps,
-  });
+  };
+  console.log(`[DEBUG] VideoEncoder config:`, encoderConfig);
+  videoEncoder.configure(encoderConfig);
+  console.log(`[DEBUG] VideoEncoder state after configure: ${videoEncoder.state}`);
 
   /* ── 5. Audio encoder + decoder (optional) ─────────── */
   let audioEncoder = null;
@@ -682,29 +690,71 @@ async function transcode(file, cfg) {
     codedHeight: videoTrack.video.height,
     ...(videoDesc ? { description: videoDesc } : {}),
   };
-  videoDecoder.configure(decoderConfig);
+
+  function createVideoDecoder() {
+    const dec = new VideoDecoder({
+      output: (frame) => {
+        try {
+          const kf = frameIdx % keyFrameInterval === 0;
+
+          if (needsResize) {
+            const canvas = new OffscreenCanvas(outW, outH);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(frame, 0, 0, outW, outH);
+            const resized = new VideoFrame(canvas, {
+              timestamp: frame.timestamp,
+              duration: frame.duration,
+            });
+            frame.close();
+            videoEncoder.encode(resized, { keyFrame: kf });
+            resized.close();
+          } else {
+            videoEncoder.encode(frame, { keyFrame: kf });
+            frame.close();
+          }
+
+          frameIdx++;
+        } catch (e) {
+          frame.close();
+          console.error("Decode→Encode error:", e);
+        }
+      },
+      error: (e) => console.warn("VideoDecoder error (will recreate):", e),
+    });
+    dec.configure(decoderConfig);
+    return dec;
+  }
+
+  let videoDecoder = createVideoDecoder();
 
   /* ── 7. Feed video samples ─────────────────────────── */
+  console.log(`[DEBUG] Starting to feed ${videoSamples.length} video samples`);
   let skippedFrames = 0;
-  for (let i = 0; i < videoSamples.length; i++) {
-    const s = videoSamples[i];
 
-    // If decoder closed due to error, reconfigure and skip to next keyframe
-    if (videoDecoder.state === "closed" || videoDecoder.state === "unconfigured") {
-      console.warn(`[DEBUG] Decoder ${videoDecoder.state} at sample ${i}, scanning for next keyframe to recover…`);
-      // Find the next sync (keyframe) sample to resume from
-      while (i < videoSamples.length && !videoSamples[i].is_sync) {
-        skippedFrames++;
-        videoSamples[i] = null;
-        i++;
-      }
+  function skipToNextKeyframe(from) {
+    let j = from;
+    while (j < videoSamples.length && !videoSamples[j].is_sync) {
+      videoSamples[j] = null;
+      j++;
+    }
+    const skipped = j - from;
+    skippedFrames += skipped;
+    return j;
+  }
+
+  for (let i = 0; i < videoSamples.length; i++) {
+    // If decoder died, recreate it and skip to next keyframe
+    if (videoDecoder.state === "closed") {
+      console.warn(`[DEBUG] Decoder closed at sample ${i}, scanning for next keyframe…`);
+      i = skipToNextKeyframe(i);
       if (i >= videoSamples.length) break;
-      // Recreate and reconfigure the decoder
-      videoDecoder.configure(decoderConfig);
-      console.warn(`[DEBUG] Decoder reconfigured, resuming at keyframe sample ${i}, skipped ${skippedFrames} frames`);
+      videoDecoder = createVideoDecoder();
+      console.warn(`[DEBUG] New decoder created, resuming at keyframe sample ${i}, skipped ${skippedFrames} total`);
     }
 
-    while (videoDecoder.decodeQueueSize > 30) {
+    const s = videoSamples[i];
+
+    while (videoDecoder.decodeQueueSize > 30 || videoEncoder.encodeQueueSize > 30) {
       await new Promise((r) => setTimeout(r, 1));
     }
 
@@ -718,8 +768,22 @@ async function transcode(file, cfg) {
         })
       );
     } catch (e) {
-      console.warn(`[DEBUG] decode() threw at sample ${i}:`, e);
+      // decode() threw synchronously — skip to next keyframe and recreate
+      console.warn(`[DEBUG] decode() threw at sample ${i}, recovering:`, e.message);
       skippedFrames++;
+      i = skipToNextKeyframe(i + 1);
+      if (i >= videoSamples.length) break;
+      videoDecoder = createVideoDecoder();
+      // Decode the keyframe we landed on
+      const ks = videoSamples[i];
+      videoDecoder.decode(
+        new EncodedVideoChunk({
+          type: "key",
+          timestamp: (ks.cts * 1_000_000) / videoTrack.timescale,
+          duration: (ks.duration * 1_000_000) / videoTrack.timescale,
+          data: ks.data,
+        })
+      );
     }
 
     videoSamples[i] = null;
@@ -753,6 +817,7 @@ async function transcode(file, cfg) {
   }
 
   /* ── 9. Flush everything ───────────────────────────── */
+  console.log(`[DEBUG] Pre-flush state: videoDecoder=${videoDecoder.state}, videoEncoder=${videoEncoder.state}, encodedFrames=${encodedFrames}, frameIdx=${frameIdx}`);
   showProgress(0.96, "Flushing encoders\u2026");
 
   const safeFlush = async (codec, label) => {
@@ -783,9 +848,12 @@ async function transcode(file, cfg) {
   if (audioEncoder) safeClose(audioEncoder, "AudioEncoder");
 
   muxer.finalize();
+  const outBuf = muxer.target.buffer;
+  console.log(`[DEBUG] Final output buffer size: ${outBuf.byteLength} bytes`);
+  console.log(`[DEBUG] Total encoded frames: ${encodedFrames}, total decoded frames: ${frameIdx}`);
   showProgress(1, "Complete!");
 
-  return muxer.target.buffer;
+  return outBuf;
 }
 
 /* ═══════════════════════════════════════════════════════
