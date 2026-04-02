@@ -653,36 +653,6 @@ async function transcode(file, cfg) {
     outW !== videoTrack.video.width || outH !== videoTrack.video.height;
   let frameIdx = 0;
 
-  const videoDecoder = new VideoDecoder({
-    output: (frame) => {
-      try {
-        const kf = frameIdx % keyFrameInterval === 0;
-
-        if (needsResize) {
-          const canvas = new OffscreenCanvas(outW, outH);
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(frame, 0, 0, outW, outH);
-          const resized = new VideoFrame(canvas, {
-            timestamp: frame.timestamp,
-            duration: frame.duration,
-          });
-          frame.close();
-          videoEncoder.encode(resized, { keyFrame: kf });
-          resized.close();
-        } else {
-          videoEncoder.encode(frame, { keyFrame: kf });
-          frame.close();
-        }
-
-        frameIdx++;
-      } catch (e) {
-        frame.close();
-        console.error("Decode\u2192Encode error:", e);
-      }
-    },
-    error: (e) => console.error("VideoDecoder:", e),
-  });
-
   const videoDesc = getVideoDescription(mp4boxFile, videoTrack);
   const decoderConfig = {
     codec: videoTrack.codec,
@@ -690,31 +660,105 @@ async function transcode(file, cfg) {
     codedHeight: videoTrack.video.height,
     ...(videoDesc ? { description: videoDesc } : {}),
   };
-  console.log(`[DEBUG] VideoDecoder config:`, decoderConfig);
-  console.log(`[DEBUG] videoDesc found: ${!!videoDesc}, length: ${videoDesc ? videoDesc.byteLength : 'N/A'}`);
-  videoDecoder.configure(decoderConfig);
-  console.log(`[DEBUG] VideoDecoder state after configure: ${videoDecoder.state}`);
+
+  function createVideoDecoder() {
+    const dec = new VideoDecoder({
+      output: (frame) => {
+        try {
+          const kf = frameIdx % keyFrameInterval === 0;
+
+          if (needsResize) {
+            const canvas = new OffscreenCanvas(outW, outH);
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(frame, 0, 0, outW, outH);
+            const resized = new VideoFrame(canvas, {
+              timestamp: frame.timestamp,
+              duration: frame.duration,
+            });
+            frame.close();
+            videoEncoder.encode(resized, { keyFrame: kf });
+            resized.close();
+          } else {
+            videoEncoder.encode(frame, { keyFrame: kf });
+            frame.close();
+          }
+
+          frameIdx++;
+        } catch (e) {
+          frame.close();
+          console.error("Decode→Encode error:", e);
+        }
+      },
+      error: (e) => console.warn("VideoDecoder error (will recreate):", e),
+    });
+    dec.configure(decoderConfig);
+    return dec;
+  }
+
+  let videoDecoder = createVideoDecoder();
 
   /* ── 7. Feed video samples ─────────────────────────── */
   console.log(`[DEBUG] Starting to feed ${videoSamples.length} video samples`);
+  let skippedFrames = 0;
+
+  function skipToNextKeyframe(from) {
+    let j = from;
+    while (j < videoSamples.length && !videoSamples[j].is_sync) {
+      videoSamples[j] = null;
+      j++;
+    }
+    const skipped = j - from;
+    skippedFrames += skipped;
+    return j;
+  }
+
   for (let i = 0; i < videoSamples.length; i++) {
+    // If decoder died, recreate it and skip to next keyframe
+    if (videoDecoder.state === "closed") {
+      console.warn(`[DEBUG] Decoder closed at sample ${i}, scanning for next keyframe…`);
+      i = skipToNextKeyframe(i);
+      if (i >= videoSamples.length) break;
+      videoDecoder = createVideoDecoder();
+      console.warn(`[DEBUG] New decoder created, resuming at keyframe sample ${i}, skipped ${skippedFrames} total`);
+    }
+
     const s = videoSamples[i];
 
-    while (videoDecoder.decodeQueueSize > 30) {
+    while (videoDecoder.decodeQueueSize > 30 || videoEncoder.encodeQueueSize > 30) {
       await new Promise((r) => setTimeout(r, 1));
     }
 
-    videoDecoder.decode(
-      new EncodedVideoChunk({
-        type: s.is_sync ? "key" : "delta",
-        timestamp: (s.cts * 1_000_000) / videoTrack.timescale,
-        duration: (s.duration * 1_000_000) / videoTrack.timescale,
-        data: s.data,
-      })
-    );
+    try {
+      videoDecoder.decode(
+        new EncodedVideoChunk({
+          type: s.is_sync ? "key" : "delta",
+          timestamp: (s.cts * 1_000_000) / videoTrack.timescale,
+          duration: (s.duration * 1_000_000) / videoTrack.timescale,
+          data: s.data,
+        })
+      );
+    } catch (e) {
+      // decode() threw synchronously — skip to next keyframe and recreate
+      console.warn(`[DEBUG] decode() threw at sample ${i}, recovering:`, e.message);
+      skippedFrames++;
+      i = skipToNextKeyframe(i + 1);
+      if (i >= videoSamples.length) break;
+      videoDecoder = createVideoDecoder();
+      // Decode the keyframe we landed on
+      const ks = videoSamples[i];
+      videoDecoder.decode(
+        new EncodedVideoChunk({
+          type: "key",
+          timestamp: (ks.cts * 1_000_000) / videoTrack.timescale,
+          duration: (ks.duration * 1_000_000) / videoTrack.timescale,
+          data: ks.data,
+        })
+      );
+    }
 
     videoSamples[i] = null;
   }
+  if (skippedFrames > 0) console.warn(`[DEBUG] Total skipped video frames: ${skippedFrames}`);
 
   /* ── 8. Feed audio samples ─────────────────────────── */
   if (audioDecoder) {
