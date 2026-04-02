@@ -102,11 +102,18 @@ struct ComparisonView: View {
         originalPlayer = op
         compressedPlayer = cp
 
-        if let dur = op.currentItem?.asset as? AVURLAsset {
-            Task {
-                let d = try? await dur.load(.duration)
-                await MainActor.run { duration = d?.seconds ?? 1 }
+        // Load duration from the asset directly
+        Task {
+            let asset = AVURLAsset(url: inputURL)
+            if let d = try? await asset.load(.duration) {
+                await MainActor.run {
+                    duration = d.seconds > 0 ? d.seconds : 1
+                }
             }
+            // Seek to start to show first frame
+            let start = CMTime.zero
+            await op.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+            await cp.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
         }
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
