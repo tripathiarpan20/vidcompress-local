@@ -504,10 +504,12 @@ async function transcode(file, cfg) {
   const audioSamples = [];
 
   mp4boxFile.onSamples = (trackId, _ref, samples) => {
+    console.log(`[DEBUG] onSamples fired: trackId=${trackId}, batch size=${samples.length}`);
     for (const s of samples) {
       if (trackId === videoTrack.id) videoSamples.push(s);
       else if (audioTrack && trackId === audioTrack.id) audioSamples.push(s);
     }
+    console.log(`[DEBUG] Running totals: video=${videoSamples.length}, audio=${audioSamples.length}`);
   };
 
   mp4boxFile.setExtractionOptions(videoTrack.id, null, {
@@ -518,7 +520,10 @@ async function transcode(file, cfg) {
       nbSamples: 10_000,
     });
   }
+  console.log(`[DEBUG] About to call mp4boxFile.start()`);
   mp4boxFile.start();
+  console.log(`[DEBUG] After start(): videoSamples=${videoSamples.length}, audioSamples=${audioSamples.length}`);
+  console.log(`[DEBUG] videoTrack:`, { id: videoTrack.id, codec: videoTrack.codec, nb_samples: videoTrack.nb_samples, duration: videoTrack.duration, timescale: videoTrack.timescale });
 
   showProgress(
     0.1,
@@ -583,7 +588,7 @@ async function transcode(file, cfg) {
     error: (e) => console.error("VideoEncoder:", e),
   });
 
-  videoEncoder.configure({
+  const encoderConfig = {
     codec: videoCodec,
     width: outW,
     height: outH,
@@ -591,7 +596,10 @@ async function transcode(file, cfg) {
     bitrateMode: "variable",
     latencyMode: "quality",
     framerate: fps,
-  });
+  };
+  console.log(`[DEBUG] VideoEncoder config:`, encoderConfig);
+  videoEncoder.configure(encoderConfig);
+  console.log(`[DEBUG] VideoEncoder state after configure: ${videoEncoder.state}`);
 
   /* ── 5. Audio encoder + decoder (optional) ─────────── */
   let audioEncoder = null;
@@ -676,14 +684,19 @@ async function transcode(file, cfg) {
   });
 
   const videoDesc = getVideoDescription(mp4boxFile, videoTrack);
-  videoDecoder.configure({
+  const decoderConfig = {
     codec: videoTrack.codec,
     codedWidth: videoTrack.video.width,
     codedHeight: videoTrack.video.height,
     ...(videoDesc ? { description: videoDesc } : {}),
-  });
+  };
+  console.log(`[DEBUG] VideoDecoder config:`, decoderConfig);
+  console.log(`[DEBUG] videoDesc found: ${!!videoDesc}, length: ${videoDesc ? videoDesc.byteLength : 'N/A'}`);
+  videoDecoder.configure(decoderConfig);
+  console.log(`[DEBUG] VideoDecoder state after configure: ${videoDecoder.state}`);
 
   /* ── 7. Feed video samples ─────────────────────────── */
+  console.log(`[DEBUG] Starting to feed ${videoSamples.length} video samples`);
   for (let i = 0; i < videoSamples.length; i++) {
     const s = videoSamples[i];
 
@@ -730,6 +743,7 @@ async function transcode(file, cfg) {
   }
 
   /* ── 9. Flush everything ───────────────────────────── */
+  console.log(`[DEBUG] Pre-flush state: videoDecoder=${videoDecoder.state}, videoEncoder=${videoEncoder.state}, encodedFrames=${encodedFrames}, frameIdx=${frameIdx}`);
   showProgress(0.96, "Flushing encoders\u2026");
 
   const safeFlush = async (codec, label) => {
@@ -760,9 +774,12 @@ async function transcode(file, cfg) {
   if (audioEncoder) safeClose(audioEncoder, "AudioEncoder");
 
   muxer.finalize();
+  const outBuf = muxer.target.buffer;
+  console.log(`[DEBUG] Final output buffer size: ${outBuf.byteLength} bytes`);
+  console.log(`[DEBUG] Total encoded frames: ${encodedFrames}, total decoded frames: ${frameIdx}`);
   showProgress(1, "Complete!");
 
-  return muxer.target.buffer;
+  return outBuf;
 }
 
 /* ═══════════════════════════════════════════════════════
