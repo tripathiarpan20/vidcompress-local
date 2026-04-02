@@ -2,7 +2,7 @@
 
 ![alt text](image.png)
 
-Local, hardware-accelerated video compression that runs entirely in your browser. No FFmpeg install, no cloud uploads — just two lines of command.
+Local, hardware-accelerated video compression that runs entirely in your browser — or natively on your iPhone. No FFmpeg install, no cloud uploads.
 
 ```
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -146,6 +146,94 @@ src/vidcompress/
 4. **Encode** — `VideoEncoder` (hardware) re-encodes frames with the chosen codec/bitrate
 5. **Mux** — mp4-muxer or webm-muxer packages encoded chunks into the output container
 6. **Download** — output is offered as a browser download
+
+## iOS App
+
+VidCompress is also available as a native iOS app, with the same hardware-accelerated compression pipeline running directly on your iPhone.
+
+### Requirements
+
+- iPhone with iOS 16.0+
+- Xcode 15+ on your Mac (to build and install)
+
+### Build & install
+
+```bash
+git clone https://github.com/arpantripathi/ffmpeg-compression-local.git
+cd ffmpeg-compression-local/ios/VidCompress
+
+# Open in Xcode
+open VidCompress.xcodeproj
+```
+
+1. In Xcode, select your Apple ID team under **Signing & Capabilities**
+2. Change the **Bundle Identifier** to something unique (e.g. `com.yourname.vidcompress`)
+3. Connect your iPhone via USB, select it as the run destination
+4. Press **Cmd+R** to build and install
+
+### Features
+
+- **Same compression engine** — AVFoundation with VideoToolbox hardware encoding
+- **Same bitrate formula** — identical quality mapping as the web version
+- **Codec support** — H.264, H.265 (HEVC), AV1 (A17 Pro+ only)
+- **Resolution scaling** — Original, 2160p, 1440p, 1080p, 720p, 480p
+- **Audio** — AAC re-encoding at 128kbps
+- **Comparison slider** — side-by-side original vs compressed with synced playback
+- **Share sheet** — export compressed video directly from the app
+- **Zero dependencies** — pure Apple frameworks, no third-party libraries
+
+### Supported codecs (iOS)
+
+| Codec | Availability |
+|-------|-------------|
+| H.264 (AVC) | All iOS 16+ devices |
+| H.265 (HEVC) | All iOS 16+ devices (A10+) |
+| AV1 | iPhone 15 Pro+ (A17 Pro / M3+) |
+
+### Architecture (iOS)
+
+```
+ios/VidCompress/VidCompress/
+├── VidCompressApp.swift              # App entry point
+├── Models/
+│   ├── Codec.swift                   # H.264, H.265, AV1 definitions
+│   ├── Resolution.swift              # Resolution options + scaling logic
+│   ├── CompressionSettings.swift     # Quality, resolution, codec selection
+│   ├── VideoMetadata.swift           # Input file metadata
+│   └── CompressionResult.swift       # Output stats
+├── Services/
+│   ├── VideoCompressor.swift         # AVAssetReader → AVAssetWriter pipeline
+│   ├── CodecAvailability.swift       # Runtime codec detection
+│   └── VideoMetadataExtractor.swift  # Probe input file
+├── ViewModels/
+│   └── CompressorViewModel.swift     # State machine + orchestration
+├── Views/
+│   ├── ContentView.swift             # Root view
+│   ├── VideoPickerView.swift         # PHPicker wrapper
+│   ├── InputPreviewView.swift        # Video player + file info
+│   ├── SettingsView.swift            # Codec, resolution, quality controls
+│   ├── CompressionProgressView.swift # Progress bar
+│   ├── ComparisonView.swift          # Dual-video comparison slider
+│   ├── ResultView.swift              # Stats + share button
+│   └── PlayerLayerView.swift         # AVPlayerLayer wrapper
+└── Utilities/
+    ├── BitrateCalculator.swift       # Bitrate formula (same as web)
+    └── FormatHelpers.swift           # Byte/duration formatting
+```
+
+### iOS compression pipeline
+
+```
+┌────────────────────────────────────────────────────┐
+│  AVAssetReader          AVAssetWriter              │
+│                                                    │
+│  TrackOutput    →    WriterInput (video)            │
+│  (HW decode)         (HW encode via VideoToolbox)  │
+│                                                    │
+│  TrackOutput    →    WriterInput (audio)            │
+│  (decompress)        (AAC 128kbps)                 │
+└────────────────────────────────────────────────────┘
+```
 
 ## Limitations
 
