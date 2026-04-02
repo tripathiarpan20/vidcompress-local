@@ -3,17 +3,21 @@ import SwiftUI
 
 struct InputPreviewView: View {
     @EnvironmentObject var vm: CompressorViewModel
+    @State private var player: AVPlayer?
 
     var body: some View {
-        if let meta = vm.metadata, let url = vm.inputURL {
+        if let meta = vm.metadata {
             VStack(spacing: 12) {
                 Text("INPUT")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                VideoPlayer(player: AVPlayer(url: url))
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .aspectRatio(meta.naturalSize, contentMode: .fit)
+                        .frame(maxHeight: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
 
                 HStack(spacing: 16) {
                     infoBadge(icon: "rectangle.3.group", text: FormatHelpers.formatDimensions(meta.naturalSize))
@@ -24,6 +28,16 @@ struct InputPreviewView: View {
             .padding()
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .onAppear {
+                if player == nil, let url = vm.inputURL {
+                    player = AVPlayer(url: url)
+                }
+            }
+            .onChange(of: vm.inputURL) { _ in
+                if let url = vm.inputURL {
+                    player = AVPlayer(url: url)
+                }
+            }
         }
     }
 

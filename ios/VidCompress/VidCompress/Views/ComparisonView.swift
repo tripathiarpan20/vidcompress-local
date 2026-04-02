@@ -5,6 +5,7 @@ import SwiftUI
 struct ComparisonView: View {
     let inputURL: URL
     let outputURL: URL
+    let videoSize: CGSize
 
     @State private var sliderFraction: CGFloat = 0.5
     @State private var originalPlayer: AVPlayer?
@@ -13,6 +14,11 @@ struct ComparisonView: View {
     @State private var seekPosition: Double = 0
     @State private var duration: Double = 1
     @State private var timeObserver: Any?
+
+    private var aspectRatio: CGFloat {
+        guard videoSize.height > 0 else { return 16.0 / 9.0 }
+        return videoSize.width / videoSize.height
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -66,7 +72,8 @@ struct ComparisonView: View {
                         }
                 )
             }
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .aspectRatio(aspectRatio, contentMode: .fit)
+            .frame(maxHeight: 400)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             // Playback controls
@@ -102,7 +109,7 @@ struct ComparisonView: View {
         originalPlayer = op
         compressedPlayer = cp
 
-        // Load duration from the asset directly
+        // Load duration and seek to first frame
         Task {
             let asset = AVURLAsset(url: inputURL)
             if let d = try? await asset.load(.duration) {
@@ -110,10 +117,8 @@ struct ComparisonView: View {
                     duration = d.seconds > 0 ? d.seconds : 1
                 }
             }
-            // Seek to start to show first frame
-            let start = CMTime.zero
-            await op.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
-            await cp.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+            await op.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            await cp.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         }
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
@@ -121,7 +126,6 @@ struct ComparisonView: View {
             guard duration > 0 else { return }
             seekPosition = time.seconds / duration
 
-            // Sync compressed player
             if let cp = compressedPlayer {
                 let drift = abs(cp.currentTime().seconds - time.seconds)
                 if drift > 0.15 {

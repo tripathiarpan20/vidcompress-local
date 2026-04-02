@@ -4,6 +4,7 @@ import SwiftUI
 struct VideoPickerView: UIViewControllerRepresentable {
     let onPick: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var vm: CompressorViewModel
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
@@ -17,16 +18,18 @@ struct VideoPickerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick, dismiss: dismiss)
+        Coordinator(onPick: onPick, dismiss: dismiss, vm: vm)
     }
 
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
         let onPick: (URL) -> Void
         let dismiss: DismissAction
+        let vm: CompressorViewModel
 
-        init(onPick: @escaping (URL) -> Void, dismiss: DismissAction) {
+        init(onPick: @escaping (URL) -> Void, dismiss: DismissAction, vm: CompressorViewModel) {
             self.onPick = onPick
             self.dismiss = dismiss
+            self.vm = vm
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
@@ -35,9 +38,16 @@ struct VideoPickerView: UIViewControllerRepresentable {
             let movieType = UTType.movie.identifier
 
             if item.itemProvider.hasItemConformingToTypeIdentifier(movieType) {
+                // Show importing state immediately
+                Task { @MainActor in
+                    vm.isImporting = true
+                }
+
                 item.itemProvider.loadFileRepresentation(forTypeIdentifier: movieType) { [onPick] url, error in
-                    guard let url = url else { return }
-                    // Copy to temp — PHPicker URL is ephemeral
+                    guard let url = url else {
+                        Task { @MainActor [vm = self.vm] in vm.isImporting = false }
+                        return
+                    }
                     let dest = FileManager.default.temporaryDirectory
                         .appendingPathComponent(UUID().uuidString)
                         .appendingPathExtension(url.pathExtension)
@@ -45,6 +55,7 @@ struct VideoPickerView: UIViewControllerRepresentable {
                         try FileManager.default.copyItem(at: url, to: dest)
                         DispatchQueue.main.async { onPick(dest) }
                     } catch {
+                        Task { @MainActor [vm = self.vm] in vm.isImporting = false }
                         print("Failed to copy picked video: \(error)")
                     }
                 }

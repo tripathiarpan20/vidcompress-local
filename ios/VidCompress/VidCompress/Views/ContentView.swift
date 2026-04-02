@@ -8,8 +8,19 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    if vm.phase == .idle {
+                    if vm.phase == .idle && !vm.isImporting {
                         pickSection
+                    }
+
+                    if vm.isImporting {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .controlSize(.large)
+                            Text("Importing video…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 40)
                     }
 
                     if vm.metadata != nil {
@@ -31,8 +42,8 @@ struct ContentView: View {
                             .padding()
                     }
 
-                    if vm.phase == .result, let result = vm.result, let inputURL = vm.inputURL {
-                        ComparisonView(inputURL: inputURL, outputURL: result.outputURL)
+                    if vm.phase == .result, let result = vm.result, let inputURL = vm.inputURL, let meta = vm.metadata {
+                        ComparisonView(inputURL: inputURL, outputURL: result.outputURL, videoSize: meta.naturalSize)
                         ResultView()
                     }
                 }

@@ -672,36 +672,59 @@ async function transcode(file, cfg) {
         console.error("Decode\u2192Encode error:", e);
       }
     },
-    error: (e) => console.error("VideoDecoder:", e),
+    error: (e) => console.warn("VideoDecoder error (will reconfigure):", e),
   });
 
   const videoDesc = getVideoDescription(mp4boxFile, videoTrack);
-  videoDecoder.configure({
+  const decoderConfig = {
     codec: videoTrack.codec,
     codedWidth: videoTrack.video.width,
     codedHeight: videoTrack.video.height,
     ...(videoDesc ? { description: videoDesc } : {}),
-  });
+  };
+  videoDecoder.configure(decoderConfig);
 
   /* ── 7. Feed video samples ─────────────────────────── */
+  let skippedFrames = 0;
   for (let i = 0; i < videoSamples.length; i++) {
     const s = videoSamples[i];
+
+    // If decoder closed due to error, reconfigure and skip to next keyframe
+    if (videoDecoder.state === "closed" || videoDecoder.state === "unconfigured") {
+      console.warn(`[DEBUG] Decoder ${videoDecoder.state} at sample ${i}, scanning for next keyframe to recover…`);
+      // Find the next sync (keyframe) sample to resume from
+      while (i < videoSamples.length && !videoSamples[i].is_sync) {
+        skippedFrames++;
+        videoSamples[i] = null;
+        i++;
+      }
+      if (i >= videoSamples.length) break;
+      // Recreate and reconfigure the decoder
+      videoDecoder.configure(decoderConfig);
+      console.warn(`[DEBUG] Decoder reconfigured, resuming at keyframe sample ${i}, skipped ${skippedFrames} frames`);
+    }
 
     while (videoDecoder.decodeQueueSize > 30) {
       await new Promise((r) => setTimeout(r, 1));
     }
 
-    videoDecoder.decode(
-      new EncodedVideoChunk({
-        type: s.is_sync ? "key" : "delta",
-        timestamp: (s.cts * 1_000_000) / videoTrack.timescale,
-        duration: (s.duration * 1_000_000) / videoTrack.timescale,
-        data: s.data,
-      })
-    );
+    try {
+      videoDecoder.decode(
+        new EncodedVideoChunk({
+          type: s.is_sync ? "key" : "delta",
+          timestamp: (s.cts * 1_000_000) / videoTrack.timescale,
+          duration: (s.duration * 1_000_000) / videoTrack.timescale,
+          data: s.data,
+        })
+      );
+    } catch (e) {
+      console.warn(`[DEBUG] decode() threw at sample ${i}:`, e);
+      skippedFrames++;
+    }
 
     videoSamples[i] = null;
   }
+  if (skippedFrames > 0) console.warn(`[DEBUG] Total skipped video frames: ${skippedFrames}`);
 
   /* ── 8. Feed audio samples ─────────────────────────── */
   if (audioDecoder) {

@@ -18,6 +18,7 @@ class CompressorViewModel: ObservableObject {
     @Published var progressMessage: String = ""
     @Published var result: CompressionResult?
     @Published var errorMessage: String?
+    @Published var isImporting = false
     @Published var codecAvailability: [Codec: Bool] = [:]
 
     private let compressor = VideoCompressor()
@@ -27,6 +28,7 @@ class CompressorViewModel: ObservableObject {
     }
 
     func loadVideo(from url: URL) async {
+        isImporting = true
         do {
             let meta = try await VideoMetadataExtractor.extract(from: url)
             inputURL = url
@@ -39,6 +41,7 @@ class CompressorViewModel: ObservableObject {
         } catch {
             errorMessage = "Failed to load video: \(error.localizedDescription)"
         }
+        isImporting = false
     }
 
     func startCompression() async {
