@@ -32,13 +32,6 @@ actor VideoCompressor {
         isCancelled = false
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        let outSize = settings.resolution.outputSize(from: metadata.naturalSize)
-        let outW = Int(outSize.width)
-        let outH = Int(outSize.height)
-        let bitrate = BitrateCalculator.bitrate(
-            quality: settings.quality, outputWidth: outW, outputHeight: outH
-        )
-
         let asset = AVURLAsset(url: input)
 
         // Reader
@@ -49,13 +42,46 @@ actor VideoCompressor {
             throw CompressionError.noVideoTrack
         }
 
+        // Use the encoded (pre-transform) dimensions, not the display dimensions.
+        // iPhone portrait video is encoded as e.g. 1920x1080 with a 90° rotation transform.
+        let encodedSize = try await videoTrack.load(.naturalSize)
+        let transform = try await videoTrack.load(.preferredTransform)
+        let isRotated = abs(transform.b) == 1 && abs(transform.c) == 1
+
+        // Calculate output size based on display dimensions (post-transform)
+        let displaySize = metadata.naturalSize
+        let targetDisplaySize = settings.resolution.outputSize(from: displaySize)
+
+        // Convert back to encoded dimensions (swap if rotated)
+        let outW: Int
+        let outH: Int
+        if isRotated {
+            outW = Int(targetDisplaySize.height)
+            outH = Int(targetDisplaySize.width)
+        } else {
+            outW = Int(targetDisplaySize.width)
+            outH = Int(targetDisplaySize.height)
+        }
+
+        // Bitrate based on actual display pixel count
+        let bitrate = BitrateCalculator.bitrate(
+            quality: settings.quality,
+            outputWidth: Int(targetDisplaySize.width),
+            outputHeight: Int(targetDisplaySize.height)
+        )
+
+        // Decode at target encoded dimensions (pre-transform)
+        let needsScale = outW != Int(encodedSize.width) || outH != Int(encodedSize.height)
+        var readerSettings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        ]
+        if needsScale {
+            readerSettings[kCVPixelBufferWidthKey as String] = outW
+            readerSettings[kCVPixelBufferHeightKey as String] = outH
+        }
         let videoReaderOutput = AVAssetReaderTrackOutput(
             track: videoTrack,
-            outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-                kCVPixelBufferWidthKey as String: outW,
-                kCVPixelBufferHeightKey as String: outH,
-            ]
+            outputSettings: readerSettings
         )
         videoReaderOutput.alwaysCopiesSampleData = false
         reader.add(videoReaderOutput)
@@ -104,8 +130,6 @@ actor VideoCompressor {
             ]
         )
         videoWriterInput.expectsMediaDataInRealTime = false
-
-        let transform = try await videoTrack.load(.preferredTransform)
         videoWriterInput.transform = transform
 
         writer.add(videoWriterInput)
