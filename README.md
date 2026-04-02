@@ -1,6 +1,8 @@
 # VidCompress
 
 ![alt text](image.png)
+<img src="image-1.png" width="50%" /> 
+
 
 Local, hardware-accelerated video compression that runs entirely in your browser — or natively on your iPhone. No FFmpeg install, no cloud uploads.
 
