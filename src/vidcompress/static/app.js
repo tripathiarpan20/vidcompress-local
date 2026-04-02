@@ -653,6 +653,36 @@ async function transcode(file, cfg) {
     outW !== videoTrack.video.width || outH !== videoTrack.video.height;
   let frameIdx = 0;
 
+  const videoDecoder = new VideoDecoder({
+    output: (frame) => {
+      try {
+        const kf = frameIdx % keyFrameInterval === 0;
+
+        if (needsResize) {
+          const canvas = new OffscreenCanvas(outW, outH);
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(frame, 0, 0, outW, outH);
+          const resized = new VideoFrame(canvas, {
+            timestamp: frame.timestamp,
+            duration: frame.duration,
+          });
+          frame.close();
+          videoEncoder.encode(resized, { keyFrame: kf });
+          resized.close();
+        } else {
+          videoEncoder.encode(frame, { keyFrame: kf });
+          frame.close();
+        }
+
+        frameIdx++;
+      } catch (e) {
+        frame.close();
+        console.error("Decode\u2192Encode error:", e);
+      }
+    },
+    error: (e) => console.warn("VideoDecoder error (will reconfigure):", e),
+  });
+
   const videoDesc = getVideoDescription(mp4boxFile, videoTrack);
   const decoderConfig = {
     codec: videoTrack.codec,
