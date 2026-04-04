@@ -128,7 +128,10 @@ function setupDragDrop() {
     const f = e.dataTransfer.files[0];
     if (f && f.type.startsWith("video/")) handleFile(f);
   });
-  dz.addEventListener("click", () => $("#file-input").click());
+  dz.addEventListener("click", (e) => {
+    if (e.target === $("#file-input")) return;
+    $("#file-input").click();
+  });
 }
 
 function setupFileInput() {
@@ -305,8 +308,7 @@ function presentResult(buffer, codec, elapsed) {
   const blob = new Blob([buffer], { type: codec.mime });
   outputVideoUrl = URL.createObjectURL(blob);
 
-  const baseName = selectedFile.name.replace(/\.[^.]+$/, "");
-  const outName = `${baseName}_compressed${codec.ext}`;
+  const outName = `compressed${codec.ext}`;
 
   // ── Stats + download ──
   $("#result-stats").innerHTML = `
@@ -330,7 +332,7 @@ function presentResult(buffer, codec, elapsed) {
   const dlBtn = $("#download-btn");
   dlBtn.href = outputVideoUrl;
   dlBtn.download = outName;
-  dlBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ${outName}`;
+  dlBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download`;
 
   $("#result-panel").style.display = "block";
 
@@ -653,36 +655,6 @@ async function transcode(file, cfg) {
     outW !== videoTrack.video.width || outH !== videoTrack.video.height;
   let frameIdx = 0;
 
-  const videoDecoder = new VideoDecoder({
-    output: (frame) => {
-      try {
-        const kf = frameIdx % keyFrameInterval === 0;
-
-        if (needsResize) {
-          const canvas = new OffscreenCanvas(outW, outH);
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(frame, 0, 0, outW, outH);
-          const resized = new VideoFrame(canvas, {
-            timestamp: frame.timestamp,
-            duration: frame.duration,
-          });
-          frame.close();
-          videoEncoder.encode(resized, { keyFrame: kf });
-          resized.close();
-        } else {
-          videoEncoder.encode(frame, { keyFrame: kf });
-          frame.close();
-        }
-
-        frameIdx++;
-      } catch (e) {
-        frame.close();
-        console.error("Decode\u2192Encode error:", e);
-      }
-    },
-    error: (e) => console.warn("VideoDecoder error (will reconfigure):", e),
-  });
-
   const videoDesc = getVideoDescription(mp4boxFile, videoTrack);
   const decoderConfig = {
     codec: videoTrack.codec,
@@ -792,8 +764,14 @@ async function transcode(file, cfg) {
 
   /* ── 8. Feed audio samples ─────────────────────────── */
   if (audioDecoder) {
+    const videoDurationUs = (videoTrack.duration / videoTrack.timescale) * 1_000_000;
     for (let i = 0; i < audioSamples.length; i++) {
       const s = audioSamples[i];
+      const tsUs = (s.cts * 1_000_000) / audioTrack.timescale;
+      if (tsUs >= videoDurationUs) {
+        audioSamples[i] = null;
+        continue;
+      }
 
       while (audioDecoder.decodeQueueSize > 30) {
         await new Promise((r) => setTimeout(r, 1));
@@ -803,7 +781,7 @@ async function transcode(file, cfg) {
         audioDecoder.decode(
           new EncodedAudioChunk({
             type: s.is_sync ? "key" : "delta",
-            timestamp: (s.cts * 1_000_000) / audioTrack.timescale,
+            timestamp: tsUs,
             duration: (s.duration * 1_000_000) / audioTrack.timescale,
             data: s.data,
           })

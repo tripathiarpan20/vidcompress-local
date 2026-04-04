@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vidcompress"
-version = "0.1.3"
+version = "0.1.4"
 description = "Local video compression powered by WebCodecs — hardware-accelerated, zero FFmpeg required"
 readme = "README.md"
 license = "MIT"
